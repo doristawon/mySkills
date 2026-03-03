@@ -1,0 +1,13 @@
+{
+  "name": "dcf_workflow",
+  "steps": [
+    {"id": 1, "name": "collect_inputs", "required": ["historical_financials", "market_params"]},
+    {"id": 2, "name": "build_scenarios", "outputs": ["bear", "base", "bull"]},
+    {"id": 3, "name": "project_ufcf"},
+    {"id": 4, "name": "compute_wacc"},
+    {"id": 5, "name": "discount_and_terminal_value"},
+    {"id": 6, "name": "equity_bridge_and_price"},
+    {"id": 7, "name": "sensitivity_analysis", "matrix": ["wacc", "terminal_growth"]},
+    {"id": 8, "name": "final_report"}
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "name": "three_statements_workflow",
+  "steps": [
+    {"id": 1, "name": "set_assumptions"},
+    {"id": 2, "name": "build_income_statement"},
+    {"id": 3, "name": "build_balance_sheet"},
+    {"id": 4, "name": "build_cash_flow"},
+    {"id": 5, "name": "link_debt_schedule"},
+    {"id": 6, "name": "run_integrity_checks", "checks": ["balance_check", "cash_tie_out", "re_roll_forward"]},
+    {"id": 7, "name": "final_report"}
+  ]
+}

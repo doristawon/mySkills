@@ -1,0 +1,12 @@
+{
+  "name": "comps_workflow",
+  "steps": [
+    {"id": 1, "name": "define_target_and_peer_criteria"},
+    {"id": 2, "name": "select_peers", "min": 4, "max": 8},
+    {"id": 3, "name": "collect_operating_metrics"},
+    {"id": 4, "name": "collect_valuation_multiples"},
+    {"id": 5, "name": "compute_statistics", "stats": ["min", "p25", "median", "p75", "max"]},
+    {"id": 6, "name": "target_relative_valuation"},
+    {"id": 7, "name": "final_report"}
+  ]
+}
