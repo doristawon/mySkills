@@ -1,0 +1,26 @@
+{
+  "_comment": "openclaw.json 的 models.providers 區段範本",
+  "agproxy": {
+    "baseUrl": "http://127.0.0.1:4010/v1",
+    "apiKey": "change-me",
+    "api": "openai-completions",
+    "models": [
+      {"id": "ag/gemini-3-flash", "name": "AG Proxy Gemini 3 Flash", "api": "openai-completions", "reasoning": false, "input": ["text"], "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}, "contextWindow": 131072, "maxTokens": 8192},
+      {"id": "ag/gemini-3.1-pro", "name": "AG Proxy Gemini 3.1 Pro", "api": "openai-completions", "reasoning": true, "input": ["text"], "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}, "contextWindow": 200000, "maxTokens": 8192},
+      {"id": "ag/claude-sonnet-4.6", "name": "AG Proxy Claude Sonnet 4.6", "api": "openai-completions", "reasoning": true, "input": ["text"], "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}, "contextWindow": 60000, "maxTokens": 8192},
+      {"id": "ag/claude-opus-4.6-thinking", "name": "AG Proxy Claude Opus 4.6 Thinking", "api": "openai-completions", "reasoning": true, "input": ["text"], "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}, "contextWindow": 60000, "maxTokens": 8192},
+      {"id": "ag/nano-banana-2", "name": "AG Proxy Nano Banana 2 (Image)", "api": "openai-completions", "reasoning": false, "input": ["text"], "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}, "contextWindow": 131072, "maxTokens": 8192},
+      {"id": "ag/media-understand-v1", "name": "AG Proxy Media Understand v1", "api": "openai-completions", "reasoning": true, "input": ["text", "image"], "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}, "contextWindow": 200000, "maxTokens": 8192}
+    ]
+  },
+  "ag-manager": {
+    "baseUrl": "http://127.0.0.1:8045/v1",
+    "apiKey": "your-manager-api-key-here",
+    "api": "openai-completions",
+    "models": [
+      {"id": "gemini-3-pro-image", "name": "Manager Gemini 3 Pro Image", "api": "openai-completions", "reasoning": false, "input": ["text", "image"], "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}, "contextWindow": 131072, "maxTokens": 8192},
+      {"id": "gemini-3.1-pro-high", "name": "Manager Gemini 3.1 Pro High", "api": "openai-completions", "reasoning": true, "input": ["text"], "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}, "contextWindow": 200000, "maxTokens": 8192},
+      {"id": "gemini-3-flash", "name": "Manager Gemini 3 Flash", "api": "openai-completions", "reasoning": false, "input": ["text"], "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}, "contextWindow": 131072, "maxTokens": 8192}
+    ]
+  }
+}
