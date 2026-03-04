@@ -144,11 +144,15 @@ const server = http.createServer(async (req, res) => {
       const mappedModel = MODEL_MAP[model] || model;
       const prompt = messagesToPrompt(body.messages || []);
 
+      require('fs').appendFileSync('/tmp/agproxy-tools-debug.json', JSON.stringify({ model: model, tools: body.tools || [] }, null, 2) + '\n');
+
       // Clean up tools to prevent Gemini API 400 error (cannot combine built-in googleSearch and custom function declarations)
+      // Gemini built-in tools appear under multiple names depending on the layer: googleSearch, google_search, web_search, google_web_search
+      const GEMINI_BUILTIN_TOOLS = new Set(['googleSearch', 'google_search', 'web_search', 'google_web_search', 'codeExecution', 'code_execution']);
       if (body.tools && Array.isArray(body.tools)) {
         body.tools = body.tools.filter(t => {
-          if (t.googleSearch || t.google_search) return false;
-          if (t.function && (t.function.name === 'googleSearch' || t.function.name === 'google_search')) return false;
+          if (t.googleSearch || t.google_search || t.web_search || t.codeExecution || t.code_execution) return false;
+          if (t.function && GEMINI_BUILTIN_TOOLS.has(t.function.name)) return false;
           return true;
         });
         if (body.tools.length === 0) {
