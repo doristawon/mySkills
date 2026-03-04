@@ -144,13 +144,93 @@ const server = http.createServer(async (req, res) => {
       const mappedModel = MODEL_MAP[model] || model;
       const prompt = messagesToPrompt(body.messages || []);
 
+      // Clean up tools to prevent Gemini API 400 error (cannot combine built-in googleSearch and custom function declarations)
+      if (body.tools && Array.isArray(body.tools)) {
+        body.tools = body.tools.filter(t => {
+          if (t.googleSearch || t.google_search) return false;
+          if (t.function && (t.function.name === 'googleSearch' || t.function.name === 'google_search')) return false;
+          return true;
+        });
+        if (body.tools.length === 0) {
+          delete body.tools;
+          delete body.tool_choice;
+        }
+      }
+
       const backendCmd = (BACKEND_CLAUDE_CMD && (model.includes('claude') || String(mappedModel).includes('claude'))) ? BACKEND_CLAUDE_CMD : BACKEND_CMD;
-      let backendResp = await runBackend({ model: mappedModel, originalModel: model, prompt, messages: body.messages || [], temperature: body.temperature, max_tokens: body.max_tokens }, backendCmd);
+      let backendResp;
+
+      // Ensure that models named agproxy/agmanager/... or agmanager/... bypass CLI
+      const isDirectManager = model.includes('agmanager/') || String(mappedModel).includes('agmanager/');
+      if (isDirectManager) {
+        // Strip out 'agproxy/agmanager/' or 'agmanager/' to get the true manager model name
+        let directModel = (mappedModel || model).replace(/^.*agmanager\//, '');
+
+        // Map 3.1-pro to the actually supported high tier in the Manager
+        if (directModel === 'gemini-3.1-pro') directModel = 'gemini-3.1-pro-high';
+
+        console.log(`[AGProxy] Direct routing to Manager API for model: ${directModel}`);
+        try {
+          const fwdPayload = { model: directModel, messages: body.messages || [], temperature: body.temperature, max_tokens: body.max_tokens, stream: false };
+          if (body.tools) fwdPayload.tools = body.tools;
+          if (body.tool_choice) fwdPayload.tool_choice = body.tool_choice;
+
+          const fwdResp = await fetch("http://127.0.0.1:8045/v1/chat/completions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": "Bearer sk-c7b22d91415946af9f0772ba40db8fec" },
+            body: JSON.stringify(fwdPayload)
+          });
+
+          if (fwdResp.ok) {
+            const fbData = await fwdResp.json();
+            const fbChoice = fbData?.choices?.[0]?.message;
+            if (fbChoice) {
+              backendResp = { text: fbChoice.content || "", tool_calls: fbChoice.tool_calls, usage: fbData.usage || {} };
+            } else {
+              backendResp = { error: "manager_empty", detail: "Manager returned empty choice" };
+            }
+          } else {
+            const errText = await fwdResp.text();
+            console.error("[AGProxy] Manager direct route returned error status:", fwdResp.status, errText);
+            backendResp = { error: "manager_http_error", detail: errText, status: fwdResp.status };
+          }
+        } catch (e) {
+          backendResp = { error: "manager_network_error", detail: e.message };
+        }
+      } else {
+        // Normal CLI or Claude Proxy execution
+        backendResp = await runBackend({
+          model: mappedModel,
+          originalModel: model,
+          prompt,
+          messages: body.messages || [],
+          temperature: body.temperature,
+          max_tokens: body.max_tokens,
+          tools: body.tools,
+          tool_choice: body.tool_choice
+        }, backendCmd);
+      }
 
       // Fallback Strategy: If primary backend fails (especially quota), try Antigravity Manager
       if (backendResp && backendResp.error) {
+        let sentDiscordAlert = false;
+        const DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1478799577082495290/FRcQGgbwJIWcrJqeqlEuG1bZXkx7kOhXxQHLVJN7I28AAC5vmj419buZQFxDzb3Yfu4p";
+
+        const sendAlert = async (msg) => {
+          try {
+            await fetch(DISCORD_WEBHOOK, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ content: msg })
+            });
+          } catch (e) { console.error("Webhook failed:", e); }
+        };
+
         if (!model.includes('claude') && !String(mappedModel).includes('claude')) {
           console.log(`[AGProxy] Primary backend failed with error: ${backendResp.error}. Falling back to Antigravity Manager API...`);
+          sendAlert(`⚠️ **[AGProxy 警報]** \`${mappedModel}\` 本機端 CLI 發生錯誤 (\`${backendResp.error}\`)。\n正在嘗試 Fallback 到 Antigravity Manager... 🔄`);
+          sentDiscordAlert = true;
+
           try {
             const fallbackPayload = { model: mappedModel, messages: body.messages || [], temperature: body.temperature, max_tokens: body.max_tokens, stream: false };
             if (body.tools) fallbackPayload.tools = body.tools;
@@ -158,7 +238,7 @@ const server = http.createServer(async (req, res) => {
             console.error(`[DEBUG_PAYLOAD] Sending to manager with tools: ${!!body.tools}`);
             const fbResp = await fetch("http://127.0.0.1:8045/v1/chat/completions", {
               method: "POST",
-              headers: { "Content-Type": "application/json", "Authorization": "Bearer YOUR_MANAGER_API_KEY_HERE" },
+              headers: { "Content-Type": "application/json", "Authorization": "Bearer sk-c7b22d91415946af9f0772ba40db8fec" },
               body: JSON.stringify(fallbackPayload)
             });
             if (fbResp.ok) {
@@ -166,10 +246,11 @@ const server = http.createServer(async (req, res) => {
               const fbChoice = fbData?.choices?.[0]?.message;
               if (fbChoice) {
                 console.log(`[AGProxy] Fallback successful! Returning manager response. (Has tool_calls: ${!!fbChoice.tool_calls})`);
-                backendResp = { 
-                    text: fbChoice.content || "", 
-                    tool_calls: fbChoice.tool_calls,
-                    usage: fbData.usage || {} 
+                sendAlert(`✅ **[AGProxy 成功]** Manager 備援接手成功！任務已繼續執行。`);
+                backendResp = {
+                  text: fbChoice.content || "",
+                  tool_calls: fbChoice.tool_calls,
+                  usage: fbData.usage || {}
                 };
                 delete backendResp.error;
                 delete backendResp.status;
@@ -177,10 +258,17 @@ const server = http.createServer(async (req, res) => {
               }
             } else {
               console.error("[AGProxy] Manager fallback returned error status:", fbResp.status);
+              sendAlert(`🚨 **[AGProxy 失敗]** Manager 備援也失敗了 (HTTP ${fbResp.status})。API 請求已完全中斷！`);
             }
           } catch (e) {
             console.error("[AGProxy] Manager fallback requested but failed entirely:", e);
+            sendAlert(`🚨 **[AGProxy 崩潰]** 無法連線至 Manager，備援請求完全失敗：\`${e.message}\``);
           }
+        }
+
+        // If it's Claude or a model without fallback that fails, alert too
+        if (backendResp && backendResp.error && !sentDiscordAlert) {
+          sendAlert(`🚨 **[AGProxy 嚴重錯誤]** 模型 \`${mappedModel}\` 發生無法修復的錯誤：\`${backendResp.error}\`\n詳細資訊：\`${String(backendResp.detail).substring(0, 200)}\``);
         }
       }
 

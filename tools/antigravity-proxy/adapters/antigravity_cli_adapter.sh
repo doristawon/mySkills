@@ -19,8 +19,12 @@ prompt=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("pro
 prompt_file=$(mktemp)
 printf "%s" "$prompt" > "$prompt_file"
 
+# STRIP "ag/" prefix from model name for the backend CLI call
+# The proxy uses "ag/model-name" but the CLI expects "model-name"
+model_name_for_cli=${model#"ag/"}
+
 CMD_TEMPLATE=${AG_PROXY_AG_CMD_TEMPLATE:-'antigravity --help >/dev/null; echo "{""text"":""[TODO] 設定 AG_PROXY_AG_CMD_TEMPLATE 後即可實際呼叫 Antigravity CLI""}"'}
-cmd=${CMD_TEMPLATE//'{{model}}'/$model}
+cmd=${CMD_TEMPLATE//'{{model}}'/$model_name_for_cli}
 cmd=${cmd//'{{prompt_file}}'/$prompt_file}
 
 set +e

@@ -17,14 +17,11 @@ trap 'rm -f "$tmp_payload" "$tmp_prompt" "$tmp_resp"' EXIT
 # Read payload directly into temp file to avoid huge bash variables
 cat > "$tmp_payload"
 
-model=$(python3 -c 'import sys,json;print(json.load(sys.stdin).get("model","gemini-3-flash-preview"))' < "$tmp_payload")
+raw_model=$(python3 -c 'import sys,json;print(json.load(sys.stdin).get("model","gemini-1.5-flash-latest"))' < "$tmp_payload")
 
-# Map models natively for CLI
-case "$model" in
-  gemini-3.1-pro-high|gemini-3.1-pro) model="gemini-2.5-pro" ;;
-  gemini-3-flash*) model="gemini-2.5-flash" ;;
-  gemini-3-pro-image) model="gemini-2.5-pro" ;;
-esac
+# STRIP "ag/" prefix from model name for the backend CLI call
+# The proxy uses "ag/model-name" but the CLI expects "model-name"
+model=${raw_model#"ag/"}
 
 # Write prompt purely to a temporary file
 python3 -c 'import sys,json; sys.stdout.write(json.load(sys.stdin).get("prompt",""))' < "$tmp_payload" > "$tmp_prompt"
