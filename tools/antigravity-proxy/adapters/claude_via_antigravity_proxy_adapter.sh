@@ -19,9 +19,9 @@ trap 'rm -f "$payload_file" "$extracted_file"' EXIT
 cat > "$payload_file"
 
 # Extract and separate system messages from non-system messages
-# Anthropic API requires system as a top-level field, NOT in messages array
+# Translates OpenAI Vision and Tools payload into Anthropic Messages API format
 python3 - "$payload_file" > "$extracted_file" <<'EOFPY'
-import sys, json, os
+import sys, json, os, re
 with open(sys.argv[1], 'r', encoding='utf-8') as f:
     p = json.load(f)
 
@@ -29,39 +29,61 @@ with open(sys.argv[1], 'r', encoding='utf-8') as f:
 raw_model = p.get('model', 'claude-sonnet-4-6')
 model = raw_model.replace('ag/', '').replace('.', '-')
 msgs = p.get('messages', [])
-max_tokens = int(p.get('max_tokens', 1024) or 1024)
+max_tokens = int(p.get('max_tokens', 4096) or 4096)
+temperature = p.get('temperature')
 
-# Separate system/developer messages from non-system messages
 system_parts = []
 non_system = []
+
 for m in msgs:
     role = (m.get('role') or 'user').strip()
     c = m.get('content', '')
-    if isinstance(c, list):
-        c = ' '.join(item.get('text','') for item in c if isinstance(item, dict))
-    if c is None:
-        c = ''
-
+    
     if role in ('system', 'developer'):
-        if c:
-            system_parts.append(str(c))
+        if isinstance(c, list):
+            c = ' '.join(item.get('text','') for item in c if isinstance(item, dict) and 'text' in item)
+        if c: system_parts.append(str(c))
         continue
 
-    # Anthropic messages only supports user/assistant roles
     out_role = role if role in ('user','assistant') else 'user'
-    out_content = str(c).strip()
-    if not out_content:
-        continue
+    out_content = []
+    
+    if isinstance(c, str):
+        if c.strip(): out_content.append({"type": "text", "text": c.strip()})
+    elif isinstance(c, list):
+        for item in c:
+            if not isinstance(item, dict): continue
+            if item.get("type") == "text" and item.get("text"):
+                out_content.append({"type": "text", "text": item["text"]})
+            elif item.get("type") == "image_url":
+                url = item.get("image_url", {}).get("url", "")
+                if url.startswith("data:"):
+                    match = re.match(r"data:(image/[a-zA-Z0-9]+);base64,(.+)", url)
+                    if match:
+                        mime_type = match.group(1)
+                        b64_data = match.group(2)
+                        out_content.append({
+                            "type": "image", 
+                            "source": {"type": "base64", "media_type": mime_type, "data": b64_data}
+                        })
+    if not out_content: continue
     non_system.append({'role': out_role, 'content': out_content})
 
-# Context overflow protection: truncate if too large
-# Note: Since the prompt can be very large, sys.stderr logging helps track truncation without breaking stdout JSON.
+# Extract Tools and translation
+anthropic_tools = []
+openapi_tools = p.get('tools', [])
+for t in openapi_tools:
+    if t.get("type") == "function" and "function" in t:
+        fn = t["function"]
+        anthropic_tools.append({
+            "name": fn.get("name"),
+            "description": fn.get("description", ""),
+            "input_schema": fn.get("parameters", {"type": "object", "properties": {}})
+        })
+
 MAX = int(os.environ.get('AG_MAX_CONTEXT_CHARS', 120000)) if 'os' in sys.modules else 120000
-import os
-try:
-    MAX = int(os.environ.get('AG_MAX_CONTEXT_CHARS', 120000))
-except Exception:
-    pass
+try: MAX = int(os.environ.get('AG_MAX_CONTEXT_CHARS', 120000))
+except Exception: pass
 
 total = sum(len(json.dumps(m, ensure_ascii=False)) for m in non_system) + len(' '.join(system_parts))
 if total > MAX:
@@ -69,19 +91,23 @@ if total > MAX:
     non_system = non_system[-keep_tail:]
     print('[adapter] truncated messages', file=sys.stderr)
 
-# Build proper Anthropic Messages API request
 req = {
     'model': model,
     'max_tokens': max_tokens,
     'messages': non_system
 }
-# System prompt goes as top-level field, NOT in messages
-if system_parts:
-    req['system'] = '\n'.join(system_parts)
+if system_parts: req['system'] = '\n'.join(system_parts)
+if p.get('stream'): req['stream'] = p.get('stream')
+if anthropic_tools: req['tools'] = anthropic_tools
+if temperature is not None: req['temperature'] = temperature
 
-# We preserve stream if it's there (useful for OpenClaw)
-if p.get('stream'):
-    req['stream'] = p.get('stream')
+# Map tool_choice
+if p.get('tool_choice'):
+    tc = p['tool_choice']
+    if tc == 'auto': req['tool_choice'] = {"type": "auto"}
+    elif tc == 'required': req['tool_choice'] = {"type": "any"}
+    elif isinstance(tc, dict) and 'function' in tc:
+        req['tool_choice'] = {"type": "tool", "name": tc['function'].get('name')}
 
 print(json.dumps(req, ensure_ascii=False))
 EOFPY
@@ -169,26 +195,39 @@ except Exception:
 
 if isinstance(obj, dict) and obj.get('error'):
     err = obj.get('error')
-    if isinstance(err, dict):
-      etype = err.get('type') or 'ag_error'
-      msg = err.get('message') or str(err)
-    else:
-      etype = 'ag_error'
-      msg = str(err)
+    msg = err.get('message') or str(err) if isinstance(err, dict) else str(err)
+    etype = err.get('type') or 'ag_error' if isinstance(err, dict) else 'ag_error'
     print(json.dumps({"error":etype,"detail":msg,"status":502}, ensure_ascii=False)); raise SystemExit(0)
 
-text=''
-for block in obj.get('content',[]):
-    if isinstance(block,dict) and block.get('type')=='text':
-        text += block.get('text','')
-usage0=obj.get('usage',{}) if isinstance(obj,dict) else {}
-usage={
+text = ''
+tool_calls = []
+for block in obj.get('content', []):
+    if isinstance(block, dict):
+        if block.get('type') == 'text':
+            text += block.get('text', '')
+        elif block.get('type') == 'tool_use':
+            tool_calls.append({
+                "id": block.get('id', 'call_ag'),
+                "type": "function",
+                "function": {
+                    "name": block.get('name'),
+                    "arguments": json.dumps(block.get('input', {}), ensure_ascii=False)
+                }
+            })
+
+usage0 = obj.get('usage', {}) if isinstance(obj, dict) else {}
+usage = {
   "prompt_tokens": int(usage0.get('input_tokens',0) or 0),
   "completion_tokens": int(usage0.get('output_tokens',0) or 0),
   "total_tokens": int((usage0.get('input_tokens',0) or 0)+(usage0.get('output_tokens',0) or 0)),
 }
-if not (text or '').strip():
-    print(json.dumps({"error":"empty_response","detail":"upstream returned empty text content","status":502}, ensure_ascii=False)); raise SystemExit(0)
-print(json.dumps({"text": text, "usage": usage}, ensure_ascii=False))
+
+out_data = {"text": text, "usage": usage}
+if tool_calls:
+    out_data["tool_calls"] = tool_calls
+elif not text.strip():
+    print(json.dumps({"error":"empty_response","detail":"upstream returned empty content","status":502}, ensure_ascii=False)); raise SystemExit(0)
+
+print(json.dumps(out_data, ensure_ascii=False))
 PY
 
