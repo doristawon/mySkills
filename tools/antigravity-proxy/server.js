@@ -201,6 +201,27 @@ const server = http.createServer(async (req, res) => {
         } catch (e) {
           backendResp = { error: "manager_network_error", detail: e.message };
         }
+
+        // If Manager failed, fall back to CLI adapter as secondary
+        if (backendResp && backendResp.error) {
+          console.log(`[AGProxy] Manager primary failed (${backendResp.error}), falling back to Gemini CLI...`);
+          const cliResp = await runBackend({
+            model: directModel,
+            originalModel: model,
+            prompt,
+            messages: body.messages || [],
+            temperature: body.temperature,
+            max_tokens: body.max_tokens,
+            tools: body.tools,
+            tool_choice: body.tool_choice
+          }, backendCmd);
+          if (cliResp && !cliResp.error) {
+            console.log("[AGProxy] Gemini CLI fallback succeeded.");
+            backendResp = cliResp;
+          } else {
+            console.error("[AGProxy] Gemini CLI fallback also failed:", cliResp?.error);
+          }
+        }
       } else {
         // Normal CLI or Claude Proxy execution
         backendResp = await runBackend({
