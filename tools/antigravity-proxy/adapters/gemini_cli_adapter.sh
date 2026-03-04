@@ -19,6 +19,13 @@ cat > "$tmp_payload"
 
 model=$(python3 -c 'import sys,json;print(json.load(sys.stdin).get("model","gemini-3-flash-preview"))' < "$tmp_payload")
 
+# Map models natively for CLI
+case "$model" in
+  gemini-3.1-pro-high|gemini-3.1-pro) model="gemini-2.5-pro" ;;
+  gemini-3-flash*) model="gemini-2.5-flash" ;;
+  gemini-3-pro-image) model="gemini-2.5-pro" ;;
+esac
+
 # Write prompt purely to a temporary file
 python3 -c 'import sys,json; sys.stdout.write(json.load(sys.stdin).get("prompt",""))' < "$tmp_payload" > "$tmp_prompt"
 
@@ -39,6 +46,11 @@ set +e
 run_json_mode > "$tmp_resp" 2>&1
 code=$?
 set -e
+
+# INTERCEPT CLI BUG (Exits 0 but contains fatal error)
+if grep -q "ModelNotFoundError\|GoogleQuotaError\|Error when talking to Gemini\|Requested entity was not found" "$tmp_resp"; then
+  code=1
+fi
 
 if [[ $code -ne 0 ]]; then
   # Pass detail via stdin to avoid Argument list too long

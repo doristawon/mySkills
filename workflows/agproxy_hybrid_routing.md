@@ -14,6 +14,14 @@ description: 替 AGProxy 與 OpenClaw 配置混血容錯路由 (Hybrid Routing) 
 
 ---
 
+
+### v2.0 更新日誌 (2026/03/04)
+- **修正 Gemini CLI Exit Code Bug**：在 `gemini_cli_adapter.sh` 加入 `grep` 攔截 `ModelNotFoundError` 與 `GoogleQuotaError`，將 Exit Code 0 強制轉為 1 以觸發 Manager 備援。
+- **支援 Tool Calls 轉發**：修改 `server.js`，在觸發 Fallback 路線時，將 `body.tools` 帶入，確保 Manager 備援依然具備工具操作能力。
+- **原生 Gemini 3.1 支援**：修正 `ag/gemini-3.1-pro` 路由轉換，不再被降級為 2.5 系列。
+- **開放多模態**：確認支援圖片與語音辨識 (`audio` payload)。
+
+
 ## 實作步驟
 
 ### 1. 收束 `openclaw.json` (清空外部 Fallbacks)

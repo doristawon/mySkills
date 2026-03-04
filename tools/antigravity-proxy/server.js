@@ -153,7 +153,9 @@ const server = http.createServer(async (req, res) => {
           console.log(`[AGProxy] Primary backend failed with error: ${backendResp.error}. Falling back to Antigravity Manager API...`);
           try {
             const fallbackPayload = { model: mappedModel, messages: body.messages || [], temperature: body.temperature, max_tokens: body.max_tokens, stream: false };
-            console.error(`[DEBUG_PAYLOAD] Sending to manager:`, JSON.stringify(fallbackPayload));
+            if (body.tools) fallbackPayload.tools = body.tools;
+            if (body.tool_choice) fallbackPayload.tool_choice = body.tool_choice;
+            console.error(`[DEBUG_PAYLOAD] Sending to manager with tools: ${!!body.tools}`);
             const fbResp = await fetch("http://127.0.0.1:8045/v1/chat/completions", {
               method: "POST",
               headers: { "Content-Type": "application/json", "Authorization": "Bearer YOUR_MANAGER_API_KEY_HERE" },
@@ -161,10 +163,14 @@ const server = http.createServer(async (req, res) => {
             });
             if (fbResp.ok) {
               const fbData = await fbResp.json();
-              const fbText = fbData?.choices?.[0]?.message?.content;
-              if (fbText) {
-                console.log(`[AGProxy] Fallback successful! Returning manager response.`);
-                backendResp = { text: fbText, usage: fbData.usage || {} };
+              const fbChoice = fbData?.choices?.[0]?.message;
+              if (fbChoice) {
+                console.log(`[AGProxy] Fallback successful! Returning manager response. (Has tool_calls: ${!!fbChoice.tool_calls})`);
+                backendResp = { 
+                    text: fbChoice.content || "", 
+                    tool_calls: fbChoice.tool_calls,
+                    usage: fbData.usage || {} 
+                };
                 delete backendResp.error;
                 delete backendResp.status;
                 delete backendResp.detail;
