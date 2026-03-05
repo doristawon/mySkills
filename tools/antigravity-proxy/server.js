@@ -257,10 +257,25 @@ const server = http.createServer(async (req, res) => {
           sentDiscordAlert = true;
 
           try {
-            const fallbackPayload = { model: mappedModel, messages: body.messages || [], temperature: body.temperature, max_tokens: body.max_tokens, stream: false };
-            if (body.tools) fallbackPayload.tools = body.tools;
-            if (body.tool_choice) fallbackPayload.tool_choice = body.tool_choice;
-            console.error(`[DEBUG_PAYLOAD] Sending to manager with tools: ${!!body.tools}`);
+            // Strip 'ag/' prefix from model name so Manager can recognise it (e.g. ag/gemini-3-flash → gemini-3-flash)
+            let fbModel = (mappedModel || model).replace(/^.*?ag\//, '').replace(/^agmanager\//, '');
+            if (fbModel === 'gemini-3.1-pro') fbModel = 'gemini-3.1-pro-high';
+
+            // Strip built-in Gemini tools from fallback payload too
+            let fbTools = body.tools;
+            if (fbTools && Array.isArray(fbTools)) {
+              fbTools = fbTools.filter(t => {
+                if (t.googleSearch || t.google_search || t.web_search || t.codeExecution || t.code_execution) return false;
+                if (t.function && GEMINI_BUILTIN_TOOLS.has(t.function.name)) return false;
+                return true;
+              });
+              if (fbTools.length === 0) fbTools = undefined;
+            }
+
+            const fallbackPayload = { model: fbModel, messages: body.messages || [], temperature: body.temperature, max_tokens: body.max_tokens, stream: false };
+            if (fbTools) fallbackPayload.tools = fbTools;
+            if (body.tool_choice && fbTools) fallbackPayload.tool_choice = body.tool_choice;
+            console.error(`[DEBUG_PAYLOAD] Sending to manager model=${fbModel} tools=${!!fbTools}`);
             const fbResp = await fetch("http://127.0.0.1:8045/v1/chat/completions", {
               method: "POST",
               headers: { "Content-Type": "application/json", "Authorization": "Bearer sk-c7b22d91415946af9f0772ba40db8fec" },
