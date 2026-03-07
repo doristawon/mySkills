@@ -14,14 +14,6 @@ description: 替 AGProxy 與 OpenClaw 配置混血容錯路由 (Hybrid Routing) 
 
 ---
 
-
-### v2.0 更新日誌 (2026/03/04)
-- **修正 Gemini CLI Exit Code Bug**：在 `gemini_cli_adapter.sh` 加入 `grep` 攔截 `ModelNotFoundError` 與 `GoogleQuotaError`，將 Exit Code 0 強制轉為 1 以觸發 Manager 備援。
-- **支援 Tool Calls 轉發**：修改 `server.js`，在觸發 Fallback 路線時，將 `body.tools` 帶入，確保 Manager 備援依然具備工具操作能力。
-- **原生 Gemini 3.1 支援**：修正 `ag/gemini-3.1-pro` 路由轉換，不再被降級為 2.5 系列。
-- **開放多模態**：確認支援圖片與語音辨識 (`audio` payload)。
-
-
 ## 實作步驟
 
 ### 1. 收束 `openclaw.json` (清空外部 Fallbacks)
@@ -48,11 +40,11 @@ let backendResp = await runBackend({ ... }, backendCmd);
 // 如果 Primary 失敗 (可能是 Quota 用盡)，啟動 Antigravity Manager 無縫備援
 if (backendResp && backendResp.error) {
   if (!model.includes('claude') && !String(mappedModel).includes('claude')) {
-    console.log(`[AGProxy] Primary backend failed. Falling back to Antigravity Manager API...`);
+    console.log(`[AGProxy] Primary backend failed with error: ${backendResp.error}. Falling back to Antigravity Manager API...`);
     try {
       const fbResp = await fetch("http://127.0.0.1:8045/v1/chat/completions", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": "Bearer YOUR_MANAGER_API_KEY_HERE" },
+        headers: { "Content-Type": "application/json", "Authorization": "Bearer sk-c7b22d91415946af9f0772ba40db8fec" },
         body: JSON.stringify({ model: mappedModel, messages: body.messages || [], temperature: body.temperature, max_tokens: body.max_tokens, stream: false })
       });
       if (fbResp.ok) {
@@ -61,6 +53,7 @@ if (backendResp && backendResp.error) {
         if (fbText) {
             console.log(`[AGProxy] Fallback successful! Returning manager response.`);
             backendResp = { text: fbText, usage: fbData.usage || {} };
+            // 必須清除原先 Error 的封裝，避免後續觸發 HTTP 502
             delete backendResp.error;
             delete backendResp.status;
             delete backendResp.detail;
